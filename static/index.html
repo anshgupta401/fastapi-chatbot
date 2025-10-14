@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Website Chat (Simple)</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width:800px; margin:20px auto; }
+    #chat { border:1px solid #ddd; padding:10px; height:400px; overflow:auto; background:#f9f9f9; }
+    .msg.user { text-align:right; margin:6px 0; }
+    .msg.bot { text-align:left; margin:6px 0; }
+    .bubble { display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; }
+    .user .bubble { background:#d1e7ff; }
+    .bot .bubble { background:#fff; border:1px solid #eee; }
+    #controls { margin-top:10px; display:flex; gap:8px; }
+    input[type="text"] { flex:1; padding:8px; }
+  </style>
+</head>
+<body>
+  <h2>Website Chat (FAISS + QA Chain)</h2>
+
+  <div>
+    <input id="urlInput" type="text" placeholder="Enter website URL (https://...)"
+           style="width:70%; padding:8px;">
+    <button id="loadBtn">Load URL</button>
+    <button id="clearBtn">Clear Memory</button>
+    <div id="status" style="margin-top:8px;color:green"></div>
+  </div>
+
+  <div id="chat" style="margin-top:12px;"></div>
+
+  <div id="controls">
+    <input id="questionInput" type="text" placeholder="Ask a question..." />
+    <button id="askBtn">Ask</button>
+  </div>
+
+<script>
+const apiBase = ""; // If frontend served from same host, keep empty. Or set to "http://127.0.0.1:8000"
+
+function appendMessage(role, text){
+  const chat = document.getElementById("chat");
+  const wrapper = document.createElement("div");
+  wrapper.className = "msg " + (role === "user" ? "user" : "bot");
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  bubble.textContent = text;
+  wrapper.appendChild(bubble);
+  chat.appendChild(wrapper);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+document.getElementById("loadBtn").addEventListener("click", async () => {
+  const url = document.getElementById("urlInput").value.trim();
+  if(!url){ alert("Enter a URL"); return; }
+  document.getElementById("status").textContent = "Loading...";
+  try{
+    const res = await fetch(apiBase + "/process_url", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    const json = await res.json();
+    if(res.ok){
+      document.getElementById("status").textContent = json.message || "Loaded";
+    } else {
+      document.getElementById("status").textContent = "Error: " + (json.detail || JSON.stringify(json));
+    }
+  }catch(err){
+    document.getElementById("status").textContent = "Network error: " + err;
+  }
+});
+
+document.getElementById("askBtn").addEventListener("click", async () => {
+  const q = document.getElementById("questionInput").value.trim();
+  if(!q) return;
+  appendMessage("user", q);
+  document.getElementById("questionInput").value = "";
+  appendMessage("bot", "…thinking…");
+
+  try{
+    const res = await fetch(apiBase + "/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: q, top_k: 4 })
+    });
+    const json = await res.json();
+    // remove the last thinking message
+    const chat = document.getElementById("chat");
+    const last = chat.lastElementChild;
+    if(last && last.querySelector(".bubble").textContent === "…thinking…") last.remove();
+
+    if(res.ok){
+      appendMessage("bot", json.answer);
+    } else {
+      appendMessage("bot", "Error: " + (json.detail || JSON.stringify(json)));
+    }
+  }catch(err){
+    appendMessage("bot", "Network error: " + err);
+  }
+});
+
+document.getElementById("clearBtn").addEventListener("click", async () => {
+  try{
+    const res = await fetch(apiBase + "/clear", { method: "POST" });
+    const json = await res.json();
+    if(res.ok){
+      appendMessage("bot", "Memory cleared.");
+    } else {
+      appendMessage("bot", "Clear failed.");
+    }
+  }catch(err){
+    appendMessage("bot", "Network error: " + err);
+  }
+});
+</script>
+</body>
+</html>
