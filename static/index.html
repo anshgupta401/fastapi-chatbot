@@ -42,8 +42,12 @@ function appendMessage(role, text){
   wrapper.className = "msg " + (role === "user" ? "user" : "bot");
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = text;
-  wrapper.appendChild(bubble);
+  bubble.innerHTML = text
+  .replace(/\\(.?)\\*/g, "<strong>$1</strong>")       // bold text
+  .replace(/\n/g, "<br>")                                 // line breaks
+  .replace(/\#\#(.*?)\n/g, "<h3>$1</h3>")                 // ## headings
+  .replace(/\#(.*?)\n/g, "<h2>$1</h2>");
+  wrapper.appendChild(bubble);                  // # headings  wrapper.appendChild(bubble);
   chat.appendChild(wrapper);
   chat.scrollTop = chat.scrollHeight;
 }
