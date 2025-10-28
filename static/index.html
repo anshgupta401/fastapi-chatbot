@@ -1,118 +1,324 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Website Chat (Simple)</title>
+  <meta charset="UTF-8">
+  <title>Website Chat (Pinecone + FastAPI)</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width:800px; margin:20px auto; }
-    #chat { border:1px solid #ddd; padding:10px; height:400px; overflow:auto; background:#f9f9f9; }
-    .msg.user { text-align:right; margin:6px 0; }
-    .msg.bot { text-align:left; margin:6px 0; }
-    .bubble { display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; }
-    .user .bubble { background:#d1e7ff; }
-    .bot .bubble { background:#fff; border:1px solid #eee; }
-    #controls { margin-top:10px; display:flex; gap:8px; }
-    input[type="text"] { flex:1; padding:8px; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f5f7fa;
+      height: 100vh;
+      overflow: hidden;
+    }
+    .container {
+      display: flex;
+      height: 100%;
+    }
+    /* 🧠 Sidebar */
+    #history {
+      width: 280px;
+      background: #1e1e2f;
+      color: #fff;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    #history h3 {
+      margin: 0 0 10px 0;
+      font-size: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #newChatBtn {
+      background: #28a745;
+      border: none;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #historyList {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      flex: 1;
+      overflow-y: auto;
+    }
+    #historyList li {
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    #historyList li:hover {
+      background: rgba(255,255,255,0.25);
+    }
+    #historyList .preview {
+      font-size: 12px;
+      color: #ccc;
+    }
+    .deleteBtn {
+      background: transparent;
+      border: none;
+      color: #ff4d4d;
+      cursor: pointer;
+      font-size: 14px;
+      float: right;
+    }
+
+    /* 💬 Main Chat Area */
+    .chat-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+    }
+    .header {
+      background: #ffffff;
+      border-bottom: 1px solid #ddd;
+      padding: 12px 20px;
+    }
+    .header h2 {
+      margin: 0;
+      font-size: 20px;
+      color: #333;
+    }
+    .url-bar {
+      padding: 10px 20px;
+      background: #fafafa;
+      border-bottom: 1px solid #ddd;
+    }
+    .url-bar input {
+      width: 65%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .url-bar button {
+      padding: 8px 12px;
+      margin-left: 4px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #loadBtn {
+      background: #007bff;
+      color: #fff;
+    }
+    #clearBtn {
+      background: #dc3545;
+      color: #fff;
+    }
+    #status {
+      margin-left: 10px;
+      color: green;
+      font-size: 14px;
+    }
+
+    /* 💭 Chat Window */
+    #chat {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #fdfdfd;
+    }
+
+    /* ✏️ Input Area */
+    #controls {
+      padding: 14px;
+      background: #fafafa;
+      border-top: 1px solid #ddd;
+      display: flex;
+      gap: 10px;
+    }
+    #questionInput {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    #askBtn {
+      padding: 10px 16px;
+      background: #28a745;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    /* 💬 Message Bubbles */
+    .msg {
+      display: flex;
+      align-items: flex-start;
+    }
+    .msg.user {
+      justify-content: flex-end;
+    }
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 14px;
+      max-width: 70%;
+      line-height: 1.4;
+      word-wrap: break-word;
+      white-space: pre-wrap;
+    }
+    .user .bubble {
+      background-color: #007bff;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .bot .bubble {
+      background-color: #e9ecef;
+      border-bottom-left-radius: 4px;
+      color: #222;
+    }
   </style>
 </head>
 <body>
-  <h2>Website Chat (FAISS + QA Chain)</h2>
+  <div class="container">
 
-  <div>
-    <input id="urlInput" type="text" placeholder="Enter website URL (https://...)"
-           style="width:70%; padding:8px;">
-    <button id="loadBtn">Load URL</button>
-    <button id="clearBtn">Clear Memory</button>
-    <div id="status" style="margin-top:8px;color:green"></div>
+    <!-- 🧠 Sidebar -->
+    <div id="history">
+      <h3>
+        🕘 History
+        <button id="newChatBtn">＋</button>
+      </h3>
+      <ul id="historyList"></ul>
+    </div>
+
+    <!-- 💬 Chat Section -->
+    <div class="chat-section">
+      <div class="header">
+        <h2>🌐 Website Chat (Pinecone + FastAPI)</h2>
+      </div>
+
+      <div class="url-bar">
+        <input id="urlInput" type="text" placeholder="Enter website URL (https://...)">
+        <button id="loadBtn">Load URL</button>
+        <button id="clearBtn">Clear</button>
+        <span id="status"></span>
+      </div>
+
+      <div id="chat"></div>
+
+      <div id="controls">
+        <input id="questionInput" type="text" placeholder="Ask a question...">
+        <button id="askBtn">Ask</button>
+      </div>
+    </div>
   </div>
 
-  <div id="chat" style="margin-top:12px;"></div>
+  <script>
+    const apiBase = ""; // leave empty if served by FastAPI
+    let currentNamespace = null;
+    let currentUrl = "";
 
-  <div id="controls">
-    <input id="questionInput" type="text" placeholder="Ask a question..." />
-    <button id="askBtn">Ask</button>
-  </div>
+    function appendMessage(role, text) {
+      const chat = document.getElementById("chat");
+      const wrapper = document.createElement("div");
+      wrapper.className = "msg " + (role === "user" ? "user" : "bot");
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      wrapper.appendChild(bubble);
+      chat.appendChild(wrapper);
+      chat.scrollTop = chat.scrollHeight;
+    }
 
-<script>
-const apiBase = ""; // If frontend served from same host, keep empty. Or set to "http://127.0.0.1:8000"
+    async function loadSessionList() {
+      const res = await fetch(apiBase + "/history/sessions");
+      const sessions = await res.json();
+      const list = document.getElementById("historyList");
+      list.innerHTML = "";
+      sessions.forEach(s => {
+        const li = document.createElement("li");
+        li.innerHTML = `<b>${s.url || "(no URL)"}</b><br><span class='preview'>${s.preview || ""}</span>
+                        <button class="deleteBtn" onclick="deleteSession(event, '${s.namespace}')">🗑</button>`;
+        li.onclick = () => loadChatHistory(s.namespace);
+        list.appendChild(li);
+      });
+    }
 
-function appendMessage(role, text){
-  const chat = document.getElementById("chat");
-  const wrapper = document.createElement("div");
-  wrapper.className = "msg " + (role === "user" ? "user" : "bot");
-  const bubble = document.createElement("div");
-  bubble.className = "bubble";
-  bubble.innerHTML = text
-  .replace(/\\(.?)\\*/g, "<strong>$1</strong>")       // bold text
-  .replace(/\n/g, "<br>")                                 // line breaks
-  .replace(/\#\#(.*?)\n/g, "<h3>$1</h3>")                 // ## headings
-  .replace(/\#(.*?)\n/g, "<h2>$1</h2>");
-  wrapper.appendChild(bubble);                  // # headings  wrapper.appendChild(bubble);
-  chat.appendChild(wrapper);
-  chat.scrollTop = chat.scrollHeight;
-}
+    async function loadChatHistory(namespace) {
+      currentNamespace = namespace;
+      const res = await fetch(apiBase + `/history/messages?namespace=${namespace}`);
+      const messages = await res.json();
+      const chat = document.getElementById("chat");
+      chat.innerHTML = "";
+      messages.forEach(msg => appendMessage(msg.role === "assistant" ? "bot" : "user", msg.message));
+    }
 
-document.getElementById("loadBtn").addEventListener("click", async () => {
-  const url = document.getElementById("urlInput").value.trim();
-  if(!url){ alert("Enter a URL"); return; }
-  document.getElementById("status").textContent = "Loading...";
-  try{
-    const res = await fetch(apiBase + "/process_url", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url })
+    async function deleteSession(e, namespace) {
+      e.stopPropagation();
+      if (!confirm("Delete this chat?")) return;
+      await fetch(apiBase + `/history/delete/${namespace}`, { method: "DELETE" });
+      loadSessionList();
+      document.getElementById("chat").innerHTML = "";
+    }
+
+    document.getElementById("newChatBtn").addEventListener("click", async () => {
+      await fetch(apiBase + "/history/new", { method: "POST" });
+      document.getElementById("chat").innerHTML = "";
+      document.getElementById("urlInput").value = "";
+      document.getElementById("status").textContent = "🆕 New chat started.";
     });
-    const json = await res.json();
-    if(res.ok){
-      document.getElementById("status").textContent = json.message || "Loaded";
-    } else {
-      document.getElementById("status").textContent = "Error: " + (json.detail || JSON.stringify(json));
-    }
-  }catch(err){
-    document.getElementById("status").textContent = "Network error: " + err;
-  }
-});
 
-document.getElementById("askBtn").addEventListener("click", async () => {
-  const q = document.getElementById("questionInput").value.trim();
-  if(!q) return;
-  appendMessage("user", q);
-  document.getElementById("questionInput").value = "";
-  appendMessage("bot", "…thinking…");
-
-  try{
-    const res = await fetch(apiBase + "/ask", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question: q, top_k: 4 })
+    document.getElementById("loadBtn").addEventListener("click", async () => {
+      const url = document.getElementById("urlInput").value.trim();
+      if (!url) { alert("Enter a URL"); return; }
+      document.getElementById("status").textContent = "Loading...";
+      try {
+        const res = await fetch(apiBase + "/process_url", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+        const json = await res.json();
+        if (res.ok) {
+          document.getElementById("status").textContent = "✅ Loaded!";
+          currentNamespace = json.namespace;
+          currentUrl = url;
+          loadSessionList();
+        } else {
+          document.getElementById("status").textContent = "Error: " + json.detail;
+        }
+      } catch (err) {
+        document.getElementById("status").textContent = "Network error: " + err;
+      }
     });
-    const json = await res.json();
-    // remove the last thinking message
-    const chat = document.getElementById("chat");
-    const last = chat.lastElementChild;
-    if(last && last.querySelector(".bubble").textContent === "…thinking…") last.remove();
 
-    if(res.ok){
-      appendMessage("bot", json.answer);
-    } else {
-      appendMessage("bot", "Error: " + (json.detail || JSON.stringify(json)));
-    }
-  }catch(err){
-    appendMessage("bot", "Network error: " + err);
-  }
-});
+    document.getElementById("askBtn").addEventListener("click", async () => {
+      const q = document.getElementById("questionInput").value.trim();
+      if (!q) return;
+      appendMessage("user", q);
+      document.getElementById("questionInput").value = "";
+      appendMessage("bot", "…thinking…");
 
-document.getElementById("clearBtn").addEventListener("click", async () => {
-  try{
-    const res = await fetch(apiBase + "/clear", { method: "POST" });
-    const json = await res.json();
-    if(res.ok){
-      appendMessage("bot", "Memory cleared.");
-    } else {
-      appendMessage("bot", "Clear failed.");
-    }
-  }catch(err){
-    appendMessage("bot", "Network error: " + err);
-  }
-});
-</script>
+      try {
+        const res = await fetch(apiBase + "/ask", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: q, top_k: 4, url: currentUrl })
+        });
+        const json = await res.json();
+        const chat = document.getElementById("chat");
+        const last = chat.lastElementChild;
+        if (last && last.querySelector(".bubble").textContent === "…thinking…") last.remove();
+        if (res.ok) appendMessage("bot", json.answer);
+        else appendMessage("bot", "Error: " + (json.detail || JSON.stringify(json)));
+      } catch (err) {
+        appendMessage("bot", "Network error: " + err);
+      }
+    });
+
+    loadSessionList();
+  </script>
 </body>
 </html>

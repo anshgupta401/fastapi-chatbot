@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Query
 from dotenv import load_dotenv
 from langchain_community.document_loaders import UnstructuredURLLoader
 import os
@@ -14,9 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_core.documents import Document
+from sqlalchemy.orm import Session
+from datetime import datetime
+from database import Base, engine, get_db
+from models import ChatSession, Message
 import hashlib
 
-
+Base.metadata.create_all(bind = engine)
 
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
@@ -61,6 +65,29 @@ class URLRequest(BaseModel):
 class QueryRequest(BaseModel):
     question: str
     top_k: int = 4
+    url: str = None
+
+def create_session(db: Session, url: str, namespace: str):
+    session = db.query(ChatSession).filter_by(namespace = namespace).first()
+    if not session:
+        session = ChatSession(url = url, namespace = namespace)
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session.id, True
+    return session.id, False
+
+def save_message(db:Session, session_id: int, role: str, message: str):
+    msg = Message(session_id = session_id, role = role, message = message)
+    db.add(msg)
+    db.commit()
+
+def get_chat_history(db:Session, namespace: str):
+    session = db.query(ChatSession).filter_by(namespace = namespace).first()
+    if not session:
+        return []
+    messages = db.query(Message).filter_by(session_id = session.id).order_by(Message.timestamp.asc()).all()
+    return [{"role": m.role, "Message": m.message, "Time":m.timestamp.strftime("%H:%M:%S")} for m in messages]
 
 def generate_namespace(url:str)->str:
     return hashlib.md5(url.encode()).hexdigest()[:10]
@@ -113,8 +140,18 @@ def query_from_pinecone(query_text: str, namespace:str, top_k: int =4):
     return docs
 
 
-
-
+# @app.post("/test_message")
+# def test_message(db:Session = Depends(get_db)):
+#     session_id = "efa1422ea4"
+#     msgs = db.query(Message).filter_by(session_id = session_id).order_by(Message.timestamp.asc()).all()
+#     return [
+#         {
+#             "role": m.role,
+#             "message": m.message,
+#             "time": m.timestamp.strftime("%H:%M:%S"),
+#         }
+#         for m in msgs
+#         ]
 
 
 
@@ -135,16 +172,26 @@ def insert_url(req: URLRequest):
         raise HTTPException(status_code= 500, detail = str(e))
 
 @app.post("/ask")
-def ask_question(req:QueryRequest):
-    if not memory["docs"]:
-        raise HTTPException(status_code=404, detail="No URL loaded, Please call the process API")
+def ask_question(req:QueryRequest, db: Session = Depends(get_db)):
+    
     try:
         namespace = memory.get("namespace")
+        url = req.url or memory.get("url", "unknown")
+        session_id,is_new = create_session(db, url = url, namespace = namespace)
+        if not is_new:
+            chat_history = [
+                (m['message'], "") if m['role'] == "user" else ("", m['message']) for m in get_chat_history(db,namespace)
+            ]
+        else:
+            chat_history = []
+        save_message(db, session_id, "user", req.question)
         ret_docs = query_from_pinecone(req.question,namespace = namespace, top_k = req.top_k) 
         if not ret_docs:
             return {"No content found in Pinecone"}           
-        answer = get_answer(req.question, ret_docs, memory["history"], top_k=req.top_k)
-        memory["history"].append((req.question, answer))
+        answer = get_answer(req.question, ret_docs, chat_history, top_k=req.top_k)
+        chat_history.append((req.question, answer))
+        memory['history'] = chat_history
+        save_message(db, session_id, "assistant", answer)
         print(memory["vector_store"])
         return {"answer": answer, "question": req.question}
     except Exception as e:
@@ -161,5 +208,74 @@ def clear_cache():
         return {"status": "success", "message": "chat memory cleared"}
     except Exception as e:
         raise HTTPException(status_code = 500, detail=str(e))
+
+
+
+
+@app.get("/history/sessions")
+def list_sessions(db:Session = Depends(get_db)):
+    sessions = db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
+    result = []
+    for s in sessions:
+        first_msg = db.query(Message).filter_by(session_id = s.id).order_by(Message.timestamp.asc()).first()
+        preview = first_msg.message[:60] + "..." if first_msg else "(empty)"
+        result.append({
+             
+            "id": s.id,
+            "url": s.url,
+            "namespace": s.namespace,
+            "created_at": s.created_at.strftime("%Y--%m--%d %H:%M:%S"), 
+            "preview": preview,
+
+        
+        })
+    return result
+
+@app.get("/history/messages")
+def get_session_message(namespace: str = Query(...), db: Session = Depends(get_db)):
+    session = db.query(ChatSession).filter_by(namespace = namespace).first()
+    if not session:
+        raise HTTPException(status_code= 404, detail = "session not found")
+    msgs = db.query(Message).filter_by(session_id = session.id).order_by(Message.timestamp.asc()).all()
+    for m in msgs:
+        print(m.message)
+    return [
+        {
+            "role": m.role,
+            "message": m.message,
+            "time": m.timestamp.strftime("%H:%M:%S"),
+        }
+        for m in msgs
+    ]
+
+@app.delete("/history/delete/{namespace}")
+def delete_session(namespace: str, db:Session = Depends(get_db)):
+    session = db.query(ChatSession).filter_by(namespace = namespace).first()
+    if not session:
+        raise HTTPException(status_code= 404, detail = "session not found")
+    db.query(Message).filter_by(session_id = session.id).delete()
+    db.delete(session)
+    db.commit()
+    return {"message":f"Session {namespace} deleted successfully"}
+
+@app.post("/history/new")
+def new_chat():
+    memory['docs'] = None
+    memory['history'] = []
+    memory['vector_store'] = None
+    memory['namespace'] = None
+    memory['url'] = None
+    return {"message":"new chat started"}
+
+
+
+
+
+
+
+
+
+
+
 
 app.mount("/", StaticFiles(directory = "static", html = True), name = "static")
